@@ -27,6 +27,7 @@ from vllm.tracing import (
     instrument_manual,
 )
 from vllm.utils import length_from_prompt_token_ids_or_embeds
+from vllm.v1 import _ttft_trace
 from vllm.v1.engine import EngineCoreOutput, EngineCoreRequest, FinishReason
 from vllm.v1.engine.detokenizer import IncrementalDetokenizer
 from vllm.v1.engine.logprobs import LogprobsProcessor
@@ -652,6 +653,7 @@ class OutputProcessor:
                 if req_state.streaming_input:
                     request_output.finished = False
 
+                _ttft_trace.emit("output_processed", req_state.request_id)
                 if req_state.queue is not None:
                     # AsyncLLM: put into queue for handling by generate().
                     req_state.queue.put(request_output)
@@ -661,6 +663,12 @@ class OutputProcessor:
 
             # Free completed requests.
             if finish_reason is not None:
+                # Release TTFT-trace guard entries for both id namespaces:
+                # output_processed uses the suffixed request_id; the
+                # API-surface tags (arrival/add_request/generate_yield/
+                # sse_yield) use the external_req_id.
+                _ttft_trace.release(req_state.request_id)
+                _ttft_trace.release(req_state.external_req_id)
                 if req_state.streaming_input:
                     if req_state.input_chunk_queue:
                         update = req_state.input_chunk_queue.popleft()

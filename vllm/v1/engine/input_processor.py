@@ -28,6 +28,7 @@ from vllm.tasks import GENERATION_TASKS, POOLING_TASKS, SupportedTask
 from vllm.tokenizers import TokenizerLike
 from vllm.utils import length_from_prompt_token_ids_or_embeds, random_uuid
 from vllm.utils.jsontree import json_iter_leaves
+from vllm.v1 import _ttft_trace
 from vllm.v1.engine import EngineCoreRequest
 
 logger = init_logger(__name__)
@@ -206,6 +207,7 @@ class InputProcessor:
         data_parallel_rank: int | None = None,
         resumable: bool = False,
     ) -> EngineCoreRequest:
+        _ttft_trace.emit("arrival", request_id)
         self._validate_params(params, supported_tasks)
         self._validate_lora(lora_request)
 

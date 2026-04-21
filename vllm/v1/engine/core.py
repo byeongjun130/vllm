@@ -38,6 +38,7 @@ from vllm.utils.gc_utils import (
 from vllm.utils.hashing import get_hash_fn_by_name
 from vllm.utils.network_utils import make_zmq_socket
 from vllm.utils.system_utils import decorate_logs, set_process_title
+from vllm.v1 import _ttft_trace
 from vllm.v1.core.kv_cache_utils import (
     BlockHash,
     generate_scheduler_kv_cache_config,
@@ -325,6 +326,7 @@ class EngineCore:
             raise TypeError(
                 f"request_id must be a string, got {type(request.request_id)}"
             )
+        _ttft_trace.emit("enginecore_recv", request.request_id)
 
         if pooling_params := request.pooling_params:
             supported_pooling_tasks = [
@@ -1205,6 +1207,11 @@ class EngineCoreProc(EngineCore):
         outputs, model_executed = self.step_fn()
         # Put EngineCoreOutputs into the output queue.
         for output in outputs.items() if outputs else ():
+            _client_index, engine_core_outputs = output
+            for eco in engine_core_outputs.outputs:
+                _ttft_trace.emit("enginecore_output", eco.request_id)
+            for finished_req_id in engine_core_outputs.finished_requests or ():
+                _ttft_trace.release(finished_req_id)
             self.output_queue.put_nowait(output)
         # Post-step hook.
         self.post_step(model_executed)

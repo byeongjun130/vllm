@@ -41,6 +41,7 @@ from vllm.sampling_params import BeamSearchParams, SamplingParams
 from vllm.tokenizers import TokenizerLike
 from vllm.utils.async_utils import merge_async_iterators
 from vllm.utils.collection_utils import as_list
+from vllm.v1 import _ttft_trace
 
 if TYPE_CHECKING:
     from vllm.entrypoints.serve.render.serving import OpenAIServingRender
@@ -411,6 +412,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         )
 
                     response_json = chunk.model_dump_json(exclude_unset=False)
+                    _ttft_trace.emit("sse_yield", request_id)
                     yield f"data: {response_json}\n\n"
 
             total_prompt_tokens = sum(num_prompt_tokens)

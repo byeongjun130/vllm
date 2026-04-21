@@ -37,6 +37,7 @@ from vllm.transformers_utils.config import maybe_register_config_serialize_by_va
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils.async_utils import cancel_task_threadsafe
 from vllm.utils.collection_utils import as_list
+from vllm.v1 import _ttft_trace
 from vllm.v1.engine import EngineCoreRequest, PauseMode
 from vllm.v1.engine.core_client import EngineCoreClient
 from vllm.v1.engine.exceptions import EngineDeadError, EngineGenerateError
@@ -404,6 +405,7 @@ class AsyncLLM(EngineClient):
         index: int,
         queue: RequestOutputCollector,
     ):
+        _ttft_trace.emit("add_request", request.request_id)
         # Add the request to OutputProcessor (this process).
         self.output_processor.add_request(request, prompt, parent_req, index, queue)
 
@@ -580,6 +582,7 @@ class AsyncLLM(EngineClient):
                 assert isinstance(out, RequestOutput)
                 finished = out.finished
                 if out is not STREAM_FINISHED:
+                    _ttft_trace.emit("generate_yield", request_id)
                     yield out
 
         # If the request is disconnected by the client, generate()
