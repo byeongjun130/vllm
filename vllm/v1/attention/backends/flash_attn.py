@@ -711,6 +711,31 @@ class FlashAttentionImpl(AttentionImpl):
             # Profiling run.
             return output.fill_(0)
 
+        # Per-iteration attention tracing (gated by VLLM_ITER_TRACING env).
+        # get_tracer() returns None when disabled or on non-rank-0 workers,
+        # making this a zero-cost path in production.
+        from vllm.v1.metrics.iteration_tracer import get_tracer
+        _iter_tracer = get_tracer()
+        if _iter_tracer is not None:
+            _iter_tracer.attn_begin()
+        try:
+            return self._forward_impl(
+                layer, query, key, value, kv_cache, attn_metadata, output,
+            )
+        finally:
+            if _iter_tracer is not None:
+                _iter_tracer.attn_end()
+
+    def _forward_impl(
+        self,
+        layer: torch.nn.Module,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: torch.Tensor,
+        attn_metadata: FlashAttentionMetadata,
+        output: torch.Tensor,
+    ) -> torch.Tensor:
         attn_type = self.attn_type
 
         # IMPORTANT!

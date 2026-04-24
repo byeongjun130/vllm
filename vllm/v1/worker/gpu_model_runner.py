@@ -482,6 +482,14 @@ class GPUModelRunner(
         # Sampler
         self.sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
 
+        # Per-iteration attention/other tracing. No-op unless
+        # VLLM_ITER_TRACING=1; gated tracer init handles the env check.
+        from vllm.v1.metrics.iteration_tracer import init_tracer as _init_iter_tracer
+        self._iter_tracer = _init_iter_tracer(
+            self.model_config.get_total_num_hidden_layers()
+        )
+        self._iter_step_idx = 0
+
         self.eplb_state: EplbState | None = None
         # NOTE(yongji): flag to temporarily disable EPLB during scaling up/down
         self.eep_eplb_suppressed = False
@@ -4005,6 +4013,12 @@ class GPUModelRunner(
         # When spec decode is enabled, defer connector finalization
         # (wait_for_save + clear metadata) until after draft model runs.
         defer_kv_connector_finalize = self.speculative_config is not None
+
+        # Per-iteration tracing: record total_start just before forward.
+        # No-op unless VLLM_ITER_TRACING=1 on the server process.
+        if self._iter_tracer is not None:
+            self._iter_tracer.step_begin(self._iter_step_idx)
+
         with (
             set_forward_context(
                 attn_metadata,
@@ -4030,6 +4044,23 @@ class GPUModelRunner(
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
+
+        if self._iter_tracer is not None:
+            req_ids_list = self.input_batch.req_ids[:num_reqs]
+            q_lens = [
+                int(scheduler_output.num_scheduled_tokens[r])
+                for r in req_ids_list
+            ]
+            num_computed = (
+                self.input_batch.num_computed_tokens_cpu[:num_reqs].tolist()
+            )
+            shapes = [(q, int(n) + q) for n, q in zip(num_computed, q_lens)]
+            self._iter_tracer.step_end(shapes)
+            # drain() blocks on total_end.synchronize() then writes one
+            # NDJSON line. Adds a per-step CPU stall (~ms) which is
+            # acceptable for validation but not for production.
+            self._iter_tracer.drain()
+            self._iter_step_idx += 1
 
         with record_function_or_nullcontext("gpu_model_runner: postprocess"):
             if self.use_aux_hidden_state_outputs:
